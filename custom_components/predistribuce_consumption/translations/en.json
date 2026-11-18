@@ -1,0 +1,62 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PREdistribuce portal",
+        "description": "Log in to the PRE distribuce customer portal and enter the EAN of the meter to import. Optionally add the HDO receiver command code to also get the low/high tariff schedule.",
+        "data": {
+          "username": "Username / e-mail",
+          "password": "Password",
+          "ean": "EAN",
+          "backfill_days": "Days of history to import",
+          "hdo_command": "HDO command code (optional)"
+        },
+        "data_description": {
+          "hdo_command": "The receiver command code (povel), e.g. 605 - printed on your meter or in your contract. Leave empty to skip HDO."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "The portal login no longer works. Enter the current credentials.",
+        "data": {
+          "username": "Username / e-mail",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Login failed: wrong credentials, or the portal blocked the login (reCAPTCHA).",
+      "cannot_connect": "Cannot reach the portal.",
+      "invalid_hdo_command": "The HDO command code must be a number.",
+      "unknown_hdo_command": "The portal has no HDO schedule for this command code."
+    },
+    "abort": {
+      "already_configured": "This EAN is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HDO schedule",
+        "description": "Receiver command code (povel) for the low/high tariff schedule. With a code set, consumption is also split into NT and VT statistics. Clear the code to turn HDO off.",
+        "data": {
+          "hdo_command": "HDO command code",
+          "hdo_history_days": "Days of history to split by tariff",
+          "price_nt": "Low tariff (NT) price, CZK/kWh incl. VAT",
+          "price_vt": "High tariff (VT) price, CZK/kWh incl. VAT"
+        },
+        "data_description": {
+          "price_nt": "Optional. Writes a cost statistic in CZK for the Energy dashboard (choose it under \"Use an entity tracking the total costs\"). Use the full per-kWh price: supply + distribution + system services + POZE + tax, with VAT. Needs the HDO code.",
+          "price_vt": "Same as for NT, for the high tariff.",
+          "hdo_history_days": "Used the first time the split is created (one request per day to PRE's HDO history). Later runs only update the latest days."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the portal.",
+      "invalid_hdo_command": "The HDO command code must be a number.",
+      "unknown_hdo_command": "The portal has no HDO schedule for this command code."
+    }
+  }
+}

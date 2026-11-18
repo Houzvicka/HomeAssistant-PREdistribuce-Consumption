@@ -1,0 +1,296 @@
+﻿@page "/"
+@implements IDisposable
+@inject AppState State
+
+<PageTitle>Kalkulačka ceny elektřiny</PageTitle>
+
+<h1>Kalkulačka ceny elektřiny</h1>
+<p class="lead">@State.Prices.Name · jistič @State.Breaker.Label · ceny včetně DPH a fixních plateb</p>
+
+<section class="card">
+    <h2>Data o spotřebě</h2>
+    <label class="drop">
+        <InputFile OnChange="OnFilesChosen" multiple accept=".csv,text/csv" />
+        <strong>Přetáhněte sem CSV z portálu PREdistribuce</strong>
+        <span>nebo klikněte a vyberte soubory (15minutové hodnoty, jde jich nahrát víc najednou)</span>
+    </label>
+    <div class="row">
+        <button type="button" @onclick="LoadSample">Načíst ukázku</button>
+        @if (State.Files.Count > 0)
+        {
+            <button type="button" class="secondary" @onclick="State.ClearFiles">Vymazat data</button>
+        }
+    </div>
+    @foreach (var message in _messages)
+    {
+        <p class="warn">@message</p>
+    }
+    @if (State.Files.Count > 0 && State.Analysis is { } a)
+    {
+        <ul class="files">
+            @foreach (var f in State.Files)
+            {
+                <li>
+                    <strong>@f.Name</strong> · @(f.Ean ?? "EAN neznámé") · @f.Readings.Count intervalů
+                    @if (f.Readings.Count > 0)
+                    {
+                        <text> · @f.Readings.Min(r => r.Start).ToString("d. M. yyyy") – @f.Readings.Max(r => r.End).ToString("d. M. yyyy")</text>
+                    }
+                </li>
+            }
+        </ul>
+        @if (State.Files.Any(f => f.Name == SampleData.Name))
+        {
+            <p class="hint">Zobrazená data jsou <strong>ukázka</strong>, ne vaše spotřeba.</p>
+        }
+    }
+</section>
+
+<section class="notice @(State.Split.Mode == SplitMode.HdoSchedule && State.SplitWarnings.Count == 0 ? "ok" : "warn")">
+    @if (State.Split.Mode == SplitMode.HdoSchedule)
+    {
+        @if (State.SplitWarnings.Count == 0)
+        {
+            <span>Dělení VT/NT: podle zadaných oken HDO.</span>
+        }
+        else
+        {
+            <span>Dělení VT/NT: okna HDO jsou neúplná, výsledek nemusí sedět.</span>
+            <ul>@foreach (var w in State.SplitWarnings) {<li>@w</li>}</ul>
+        }
+    }
+    else
+    {
+        <span>Dělení VT/NT: <strong>pevný podíl @State.Split.VtSharePercent.ToString("0.##") % VT</strong>. Časy HDO nejsou zadané, takže jde o odhad. Zadejte je v nastavení níže.</span>
+    }
+</section>
+
+@if (State.Analysis is { } analysis)
+{
+    <section>
+        <h2>Měsíce</h2>
+        <div class="cards">
+            @foreach (var m in analysis.Months)
+            {
+                var key = (m.Year, m.Month);
+                <button type="button" class="card month @(key == Selected(analysis) ? "selected" : "")" @onclick="() => _selected = key">
+                    <span class="name">@MonthName(m)</span>
+                    <span class="days">@m.DaysCovered.ToString("0.##") z @m.DaysInMonth dnů @(m.IsComplete ? "" : "· projekce")</span>
+                    <span class="big">@Czk(m.Headline.TotalWithVat)</span>
+                    <span class="sub">@m.Headline.AveragePriceWithVat.ToString("N2") Kč/kWh včetně DPH</span>
+                    <span class="sub">Fixní platby: @Czk(FixedWithVat(m.Headline)) včetně DPH</span>
+                    <span class="sub">@m.TotalKwh.ToString("N1") kWh · VT @m.VtKwh.ToString("N1") · NT @m.NtKwh.ToString("N1")</span>
+                    <span class="bar" aria-hidden="true"><i style="width:@VtPercent(m).ToString(CultureInfo.InvariantCulture)%"></i></span>
+                    @if (!m.IsComplete)
+                    {
+                        <span class="sub">Zatím za @m.DaysCovered.ToString("0.##") dn.: @Czk(m.SoFar.TotalWithVat)</span>
+                    }
+                    @if (m.PeakKw > 0)
+                    {
+                        <span class="sub">Špička @m.PeakKw.ToString("0.##") kW</span>
+                    }
+                </button>
+            }
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Spotřeba</h2>
+        <ConsumptionChart Analysis="analysis" IsVtAt="_isVtAt" />
+    </section>
+
+    @if (analysis.Months.FirstOrDefault(m => (m.Year, m.Month) == Selected(analysis)) is { } sel)
+    {
+        <section class="card">
+            <h2>Rozpis: @MonthName(sel)</h2>
+            @if (!sel.IsComplete)
+            {
+                <div class="tabs" role="tablist">
+                    <button type="button" class="@(_showProjection ? "" : "active")" @onclick="() => _showProjection = false">Zatím (@sel.DaysCovered.ToString("0.##") dn.)</button>
+                    <button type="button" class="@(_showProjection ? "active" : "")" @onclick="() => _showProjection = true">Projekce celého měsíce</button>
+                </div>
+            }
+            <BreakdownTable Bill="@(_showProjection && sel.Projection != null ? sel.Projection : sel.SoFar)" />
+            <p class="hint">
+                Fixní platby jsou dělené podle kalendářních dnů (každý den = 1/počet dnů měsíce).
+                Projekce přenásobí spotřebu na celý měsíc a počítá s plnými fixními platbami.
+                DPH je 21 % z celkové částky; faktura PRE se může lišit o 0,01 Kč.
+            </p>
+        </section>
+    }
+}
+else
+{
+    <section class="card empty">Nahrajte CSV nebo načtěte ukázku, ať se spočítá cena.</section>
+}
+
+<section class="card">
+    <h2>Nastavení</h2>
+
+    <div class="grid">
+        <label>Hlavní jistič
+            <select value="@State.BreakerKey" @onchange="OnBreakerChanged">
+                @foreach (var b in State.Prices.Breakers)
+                {
+                    <option value="@b.Key">@b.Label · @b.MonthlyFee.ToString("0") Kč/měsíc</option>
+                }
+            </select>
+        </label>
+
+        <label>Dělení VT/NT
+            <select value="@((int)State.Split.Mode)" @onchange="OnModeChanged">
+                <option value="@((int)SplitMode.FixedShare)">Pevný podíl VT</option>
+                <option value="@((int)SplitMode.HdoSchedule)">Podle oken HDO (přesné)</option>
+            </select>
+        </label>
+    </div>
+
+    @if (State.Split.Mode == SplitMode.FixedShare)
+    {
+        <label>Podíl VT v procentech
+            <input type="number" step="0.1" min="0" max="100" value="@State.Split.VtSharePercent.ToString(CultureInfo.InvariantCulture)" @onchange="OnShareChanged" />
+        </label>
+        <p class="hint">Výchozích 16,1 % je z poslední faktury (127 z 788 kWh).</p>
+    }
+    else
+    {
+        <div class="grid">
+            <label>Okna VT, pondělí–pátek
+                <input type="text" placeholder="07:00-08:00, 11:00-12:00" value="@State.Split.WeekdayWindows" @onchange="OnWeekdayChanged" />
+            </label>
+            <label>Okna VT, sobota–neděle
+                <input type="text" placeholder="07:00-08:00, 11:00-12:00" value="@State.Split.WeekendWindows" @onchange="OnWeekendChanged" />
+            </label>
+        </div>
+        <p class="hint">
+            Tarif D57d má 20 h NT, tedy VT dohromady 4 h denně. Časy zjistíte podle kódu HDO na
+            <a href="https://www.predistribuce.cz/cs/potrebuji-zaridit/zakaznici/stav-hdo/" target="_blank" rel="noopener">stránce PREdistribuce</a>.
+            Úseky přes půlnoc jsou povolené (22:00-02:00).
+        </p>
+    }
+
+    <h3>Ceny bez DPH</h3>
+    <div class="grid prices">
+        @foreach (var field in AppState.PriceFields)
+        {
+            <label>@field.Label <small>@field.Unit</small>
+                <input type="number" step="any" min="0" value="@field.Get(State.Prices).ToString(CultureInfo.InvariantCulture)" @onchange="e => OnPriceChanged(field, e)" />
+            </label>
+        }
+    </div>
+    <div class="row">
+        <button type="button" class="secondary" disabled="@(!State.PricesModified)" @onclick="State.ResetPrices">Vrátit ceník</button>
+    </div>
+    <p class="hint">
+        Cena elektřiny je garantovaná do 31. 3. 2029. Regulované položky (distribuce, systémové služby, POZE,
+        nesíťová infrastruktura, daň) se mohou každý rok měnit rozhodnutím ERÚ, od 1. 1. 2027 je tedy
+        potřeba upravit. Nastavení se ukládá jen v tomto prohlížeči.
+    </p>
+</section>
+
+@code {
+    private (int, int)? _selected;
+    private bool _showProjection;
+    private Func<DateTime, bool>? _isVtAt;
+    private readonly List<string> _messages = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnStateChanged;
+        await State.InitializeAsync();
+    }
+
+    private void OnStateChanged()
+    {
+        _isVtAt = TariffSplitter.CreateIsVtFunc(State.Split);
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+
+    private (int, int) Selected(Analysis a)
+    {
+        if (_selected is { } s && a.Months.Any(m => (m.Year, m.Month) == s)) return s;
+        var last = a.Months[^1];
+        return (last.Year, last.Month);
+    }
+
+    private async Task OnFilesChosen(InputFileChangeEventArgs e)
+    {
+        _messages.Clear();
+        var parsed = new List<ParsedFile>();
+        foreach (var file in e.GetMultipleFiles(50))
+        {
+            try
+            {
+                await using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                var result = CsvParser.Parse(file.Name, buffer.ToArray());
+                if (result.Readings.Count == 0)
+                    _messages.Add($"Soubor {file.Name} neobsahuje použitelné řádky.");
+                else
+                    parsed.Add(result);
+            }
+            catch (Exception ex)
+            {
+                _messages.Add($"Soubor {file.Name} se nepodařilo přečíst: {ex.Message}");
+            }
+        }
+        if (parsed.Count > 0) await State.AddFilesAsync(parsed);
+    }
+
+    private async Task LoadSample()
+    {
+        _messages.Clear();
+        await State.AddFilesAsync(new[] { SampleData.Create() });
+    }
+
+    private async Task OnBreakerChanged(ChangeEventArgs e)
+    {
+        State.BreakerKey = e.Value?.ToString() ?? PriceList.DefaultBreakerKey;
+        await State.SaveAndRecalculateAsync();
+    }
+
+    private async Task OnModeChanged(ChangeEventArgs e)
+    {
+        State.Split.Mode = (SplitMode)int.Parse(e.Value?.ToString() ?? "0", CultureInfo.InvariantCulture);
+        await State.SaveAndRecalculateAsync();
+    }
+
+    private async Task OnShareChanged(ChangeEventArgs e)
+    {
+        if (TryNumber(e, out var v)) State.Split.VtSharePercent = Math.Clamp(v, 0m, 100m);
+        await State.SaveAndRecalculateAsync();
+    }
+
+    private async Task OnWeekdayChanged(ChangeEventArgs e)
+    {
+        State.Split.WeekdayWindows = e.Value?.ToString() ?? "";
+        await State.SaveAndRecalculateAsync();
+    }
+
+    private async Task OnWeekendChanged(ChangeEventArgs e)
+    {
+        State.Split.WeekendWindows = e.Value?.ToString() ?? "";
+        await State.SaveAndRecalculateAsync();
+    }
+
+    private void OnPriceChanged(PriceField field, ChangeEventArgs e)
+    {
+        if (TryNumber(e, out var v) && v >= 0) State.SetPrice(field, v);
+    }
+
+    private static bool TryNumber(ChangeEventArgs e, out decimal value) =>
+        decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+
+    private static string MonthName(MonthSummary m) => new DateTime(m.Year, m.Month, 1).ToString("MMMM yyyy");
+
+    private static string Czk(decimal v) => v.ToString("N2") + " Kč";
+
+    private static decimal VtPercent(MonthSummary m) => m.TotalKwh > 0 ? Math.Round(m.VtKwh / m.TotalKwh * 100m, 1) : 0m;
+
+    /// <summary>Monthly payments (supply point, breaker, non-network infrastructure) with VAT.</summary>
+    private static decimal FixedWithVat(Bill bill) =>
+        bill.Sections.SelectMany(s => s.Items).Where(i => i.Unit == "měs." && !i.Label.StartsWith("POZE")).Sum(i => i.Total) * (1 + bill.VatRate);
+}

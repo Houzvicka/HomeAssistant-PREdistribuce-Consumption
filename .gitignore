@@ -1,0 +1,28 @@
+# Secrets / local config
+.env
+*.local.yaml
+config/secrets.*
+credentials.json
+cookies.json
+*.session
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Downloaded data
+data/
+*.csv
+
+# Temporary files
+tmpclaude-*
+*.tmp
+
+# Claude Code settings
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,39 @@
+@* Invoice-shaped breakdown, grouped like PRE's invoice. *@
+<table class="breakdown">
+    <thead>
+        <tr>
+            <th>Položka</th>
+            <th class="num">Množství</th>
+            <th class="num">Cena bez DPH</th>
+            <th class="num">Celkem bez DPH</th>
+        </tr>
+    </thead>
+    @foreach (var section in Bill.Sections)
+    {
+        <tbody>
+            <tr class="section"><th colspan="4">@section.Title</th></tr>
+            @foreach (var item in section.Items)
+            {
+                <tr>
+                    <td>@item.Label</td>
+                    <td class="num">@Qty(item.Quantity) @item.Unit</td>
+                    <td class="num">@item.UnitPrice.ToString("0.#####") Kč</td>
+                    <td class="num">@Czk(item.Total)</td>
+                </tr>
+            }
+            <tr class="subtotal"><td colspan="3">Mezisoučet: @section.Title</td><td class="num">@Czk(section.Subtotal)</td></tr>
+        </tbody>
+    }
+    <tfoot>
+        <tr><td colspan="3">Celkem bez DPH</td><td class="num">@Czk(Bill.TotalWithoutVat)</td></tr>
+        <tr><td colspan="3">DPH @((Bill.VatRate * 100).ToString("0.##")) %</td><td class="num">@Czk(Bill.Vat)</td></tr>
+        <tr class="grand"><td colspan="3">Celkem s DPH</td><td class="num">@Czk(Bill.TotalWithVat)</td></tr>
+    </tfoot>
+</table>
+
+@code {
+    [Parameter, EditorRequired] public Bill Bill { get; set; } = default!;
+
+    private static string Czk(decimal v) => v.ToString("N2") + " Kč";
+    private static string Qty(decimal v) => v.ToString("0.###");
+}

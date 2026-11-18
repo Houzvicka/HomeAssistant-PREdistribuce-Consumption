@@ -1,0 +1,90 @@
+@* Stacked VT/NT bars: 15-minute bars for 7 days or less, daily bars for longer ranges. *@
+@if (_bars.Count > 0)
+{
+    <svg class="chart" viewBox="0 0 800 230" role="img" aria-label="Spotřeba VT a NT">
+        @* VT windows as a background band (only when the HDO schedule is known) *@
+        @if (IsVtAt != null && _perSlot)
+        {
+            @foreach (var b in _bars.Where(b => IsVtAt(b.Start)))
+            {
+                <rect class="band" x="@F(b.X)" y="@F(Top)" width="@F(_barWidth)" height="@F(Height)" />
+            }
+        }
+
+        <line class="axis" x1="@F(Left)" y1="@F(Top + Height)" x2="@F(Left + Width)" y2="@F(Top + Height)" />
+        <text class="tick" x="@F(Left - 6)" y="@F(Top + 4)" text-anchor="end">@_max.ToString("0.##")</text>
+        <text class="tick" x="@F(Left - 6)" y="@F(Top + Height + 4)" text-anchor="end">0</text>
+        <text class="tick" x="@F(Left)" y="12" text-anchor="start">kWh</text>
+
+        @foreach (var b in _bars)
+        {
+            var nt = (double)b.Nt / _max * Height;
+            var vt = (double)b.Vt / _max * Height;
+            <g>
+                <title>@b.Label: VT @b.Vt.ToString("0.###") kWh, NT @b.Nt.ToString("0.###") kWh</title>
+                <rect class="nt" x="@F(b.X)" y="@F(Top + Height - nt)" width="@F(_barWidth)" height="@F(nt)" />
+                <rect class="vt" x="@F(b.X)" y="@F(Top + Height - nt - vt)" width="@F(_barWidth)" height="@F(vt)" />
+            </g>
+        }
+
+        @* Razor treats <text> inside a code block as its own tag, so the ticks are built as markup. *@
+        @((MarkupString)TickMarkup())
+    </svg>
+    <p class="legend"><span class="swatch vt"></span> VT <span class="swatch nt"></span> NT
+        @if (IsVtAt != null && _perSlot) {<span><span class="swatch band"></span>okna VT</span>}</p>
+}
+
+@code {
+    [Parameter] public Analysis? Analysis { get; set; }
+    [Parameter] public Func<DateTime, bool>? IsVtAt { get; set; }
+
+    private const double Left = 44, Top = 18, Width = 748, Height = 172;
+
+    private sealed record Bar(DateTime Start, string Label, decimal Vt, decimal Nt, double X);
+    private sealed record Raw(DateTime Start, string Label, decimal Vt, decimal Nt);
+    private sealed record Tick(double X, string Text);
+
+    private readonly List<Bar> _bars = new();
+    private readonly List<Tick> _ticks = new();
+    private bool _perSlot;
+    private double _barWidth;
+    private double _max = 1;
+
+    private string TickMarkup() => string.Concat(_ticks.Select(t =>
+        $"<text class=\"tick\" x=\"{F(t.X)}\" y=\"{F(Top + Height + 16)}\" text-anchor=\"middle\">{t.Text}</text>"));
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    protected override void OnParametersSet()
+    {
+        _bars.Clear();
+        _ticks.Clear();
+        if (Analysis == null || Analysis.Days.Count == 0) return;
+
+        _perSlot = Analysis.Days.Count <= 7;
+        var raw = _perSlot
+            ? Analysis.Slots.Select(s => new Raw(s.Start, s.Start.ToString("d. M. HH:mm"), s.Vt, s.Nt)).ToList()
+            : Analysis.Days.Select(d => new Raw(d.Date.ToDateTime(TimeOnly.MinValue), d.Date.ToString("d. M. yyyy"), d.Vt, d.Nt)).ToList();
+
+        var n = raw.Count;
+        _barWidth = Width / n;
+        var top = (double)raw.Max(r => r.Vt + r.Nt);
+        _max = top <= 0 ? 1 : top;
+
+        for (var i = 0; i < n; i++)
+            _bars.Add(new Bar(raw[i].Start, raw[i].Label, raw[i].Vt, raw[i].Nt, Left + i * _barWidth));
+
+        if (_perSlot)
+        {
+            for (var i = 0; i < n; i++)
+                if (raw[i].Start.Hour == 0 && raw[i].Start.Minute == 0)
+                    _ticks.Add(new Tick(Left + i * _barWidth, raw[i].Start.ToString("d. M.")));
+        }
+        else
+        {
+            var step = Math.Max(1, n / 8);
+            for (var i = 0; i < n; i += step)
+                _ticks.Add(new Tick(Left + (i + 0.5) * _barWidth, raw[i].Start.ToString("d. M.")));
+        }
+    }
+}
